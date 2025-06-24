@@ -26,8 +26,8 @@ jobs:
           echo "🔄 Cloning rspack repository..."
           
           # 克隆rspack仓库
-          git clone https://github.com/web-infra-dev/rspack.git rspack-repo
-          cd rspack-repo
+          git clone https://github.com/web-infra-dev/rspack.git rspack-source
+          cd rspack-source
           
           echo "📋 Available tags:"
           git tag | grep -E "^v[0-9]" | tail -10
@@ -46,63 +46,102 @@ jobs:
           
           echo "✅ Successfully cloned rspack at tag $TAG"
       
-      - name: Setup target repository
-        run: |
-          # 移除rspack的.git目录
-          rm -rf rspack-repo/.git
-          
-          # 初始化新的git仓库
-          cd rspack-repo
-          git init
-          
-          # 配置认证token
-          git config credential.helper store
-          echo "https://x-access-token:${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}@github.com" > ~/.git-credentials
-          
-          # 添加您的仓库作为远程（使用认证URL）
-          git remote add origin https://x-access-token:${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-          
-          # 获取目标仓库信息
-          git fetch origin
-          
-          echo "✅ Repository setup completed"
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+          path: target-repo
       
-      - name: Create sync branch and commit
+      - name: Create sync branch from target repo
         run: |
           TAG="${{ github.event.inputs.tag }}"
           SYNC_BRANCH="sync-rspack-$TAG-$(date +%Y%m%d-%H%M%S)"
           echo "SYNC_BRANCH=$SYNC_BRANCH" >> $GITHUB_ENV
           
-          cd rspack-repo
+          cd target-repo
           
-          # 创建并切换到同步分支
+          # 基于main分支创建同步分支（保持git历史连接）
           git checkout -b "$SYNC_BRANCH"
+          
+          echo "✅ Created sync branch: $SYNC_BRANCH"
+      
+      - name: Sync rspack content
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          
+          cd target-repo
+          
+          # 清空当前内容（保留.git目录）
+          echo "🗑️ Clearing current content..."
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+          
+          # 复制rspack内容
+          echo "📋 Copying rspack content..."
+          cp -r ../rspack-source/* . 2>/dev/null || echo "No regular files to copy"
+          cp -r ../rspack-source/.[^.]* . 2>/dev/null || echo "No hidden files to copy"
+          
+          # 处理workflow文件权限问题
+          if [ -d ".github/workflows" ]; then
+            echo "⚠️ Found rspack workflows, checking permissions..."
+            
+            # 备份原有的同步工作流
+            if [ -f ".github/workflows/sync-rspack-tag.yml" ]; then
+              cp .github/workflows/sync-rspack-tag.yml /tmp/sync-workflow-backup.yml
+            fi
+            
+            # 移除rspack的workflows（避免权限问题）
+            rm -rf .github/workflows
+            
+            # 恢复同步工作流
+            mkdir -p .github/workflows
+            if [ -f "/tmp/sync-workflow-backup.yml" ]; then
+              cp /tmp/sync-workflow-backup.yml .github/workflows/sync-rspack-tag.yml
+              echo "✅ Preserved sync workflow"
+            else
+              echo "⚠️ Sync workflow will need to be restored manually"
+            fi
+            
+            echo "📋 Excluded rspack workflows to avoid permission issues"
+          fi
+          
+          echo "✅ Content synced successfully"
+      
+      - name: Commit and push changes
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          
+          cd target-repo
           
           # 添加所有文件
           git add .
           
-          # 提交变更
-          git commit -m "🔄 Sync to rspack $TAG" -m "Synced from: https://github.com/web-infra-dev/rspack/tree/$TAG"
-          
-          # 推送同步分支
-          git push origin "$SYNC_BRANCH"
-          
-          echo "✅ Changes committed and pushed"
-      
-      - name: Checkout target repository for PR
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+          # 检查是否有变更
+          if git diff --staged --quiet; then
+            echo "📋 No changes to commit"
+            echo "NO_CHANGES=true" >> $GITHUB_ENV
+          else
+            # 提交变更
+            git commit -m "🔄 Sync to rspack $TAG" -m "Synced from: https://github.com/web-infra-dev/rspack/tree/$TAG" -m "Note: Rspack workflows excluded to avoid permission issues"
+            
+            # 推送同步分支
+            git push origin "$SYNC_BRANCH"
+            
+            echo "✅ Changes committed and pushed"
+            echo "NO_CHANGES=false" >> $GITHUB_ENV
+          fi
       
       - name: Create Pull Request
+        if: env.NO_CHANGES == 'false'
         run: |
           TAG="${{ github.event.inputs.tag }}"
           
-          # 创建简单的PR
+          cd target-repo
+          
+          # 创建PR
           gh pr create \
             --title "🔄 Sync to rspack $TAG" \
-            --body "Complete sync to rspack $TAG using git clone method. Includes all source code, configs, and workflows." \
+            --body "Complete sync to rspack $TAG using git clone method. Includes all source code and configs. Rspack workflows excluded to avoid permission issues." \
             --head "$SYNC_BRANCH"
           
           echo "✅ Pull Request created successfully"
@@ -113,7 +152,10 @@ jobs:
         run: |
           TAG="${{ github.event.inputs.tag }}"
           echo "## 📊 Sync Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- **Method**: Git clone + remote switch" >> $GITHUB_STEP_SUMMARY
+          echo "- **Method**: Git clone with history preservation" >> $GITHUB_STEP_SUMMARY
           echo "- **Target**: rspack $TAG" >> $GITHUB_STEP_SUMMARY
           echo "- **Branch**: $SYNC_BRANCH" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status**: ✅ PR created" >> $GITHUB_STEP_SUMMARY 
+          if [ "$NO_CHANGES" = "true" ]; then
+            echo "- **Status**: ✅ No changes needed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Status**: ✅ PR created" >> $GITHUB_STEP_SUMMARY 
