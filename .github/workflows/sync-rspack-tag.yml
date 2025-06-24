@@ -15,222 +15,101 @@ jobs:
       pull-requests: write
     
     steps:
-      - name: Checkout current repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
-      
       - name: Configure Git
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
       
-      - name: Download and extract tag
+      - name: Clone rspack repository
         run: |
           TAG="${{ github.event.inputs.tag }}"
-          echo "🔄 Downloading rspack tag: $TAG"
+          echo "🔄 Cloning rspack repository..."
           
-          # 下载指定tag的代码
-          DOWNLOAD_URL="https://github.com/web-infra-dev/rspack/archive/refs/tags/$TAG.tar.gz"
-          echo "Download URL: $DOWNLOAD_URL"
+          # 克隆rspack仓库
+          git clone https://github.com/web-infra-dev/rspack.git rspack-repo
+          cd rspack-repo
           
-          if wget -O rspack-tag.tar.gz "$DOWNLOAD_URL"; then
-            echo "✅ Downloaded successfully"
-          else
-            echo "❌ Failed to download tag $TAG"
-            echo "请检查tag是否存在: https://github.com/web-infra-dev/rspack/tags"
+          echo "📋 Available tags:"
+          git tag | grep -E "^v[0-9]" | tail -10
+          
+          # 检查tag是否存在
+          if ! git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "❌ Tag $TAG not found in rspack repository"
+            echo "Available tags:"
+            git tag | grep -E "^v[0-9]" | tail -20
             exit 1
           fi
           
-          # 验证文件存在且不为空
-          if [ ! -f rspack-tag.tar.gz ] || [ ! -s rspack-tag.tar.gz ]; then
-            echo "❌ Downloaded file is missing or empty"
-            exit 1
-          fi
+          # 切换到指定tag
+          echo "🔄 Checking out tag $TAG..."
+          git checkout "$TAG"
           
-          # 创建临时目录并解压
-          mkdir -p temp-rspack
-          
-          echo "📦 Extracting archive..."
-          if tar -xzf rspack-tag.tar.gz -C temp-rspack --strip-components=1; then
-            echo "✅ Extracted successfully"
-          else
-            echo "❌ Failed to extract archive"
-            exit 1
-          fi
-          
-          # 验证解压结果
-          if [ ! "$(ls -A temp-rspack)" ]; then
-            echo "❌ Extracted directory is empty"
-            exit 1
-          fi
-          
-          echo "📋 Extracted files:"
-          ls -la temp-rspack/ | head -10
-          
-          echo "✅ Successfully downloaded and extracted $TAG"
+          echo "✅ Successfully cloned rspack at tag $TAG"
       
-      - name: Create sync branch
+      - name: Setup target repository
+        run: |
+          # 移除rspack的.git目录
+          rm -rf rspack-repo/.git
+          
+          # 初始化新的git仓库
+          cd rspack-repo
+          git init
+          
+          # 添加您的仓库作为远程
+          git remote add origin https://github.com/${{ github.repository }}.git
+          
+          # 获取目标仓库信息
+          git fetch origin
+          
+          echo "✅ Repository setup completed"
+      
+      - name: Create sync branch and commit
         run: |
           TAG="${{ github.event.inputs.tag }}"
           SYNC_BRANCH="sync-rspack-$TAG-$(date +%Y%m%d-%H%M%S)"
           echo "SYNC_BRANCH=$SYNC_BRANCH" >> $GITHUB_ENV
           
+          cd rspack-repo
+          
+          # 创建并切换到同步分支
           git checkout -b "$SYNC_BRANCH"
-          echo "✅ Created sync branch: $SYNC_BRANCH"
-      
-      - name: Backup current state
-        run: |
-          echo "💾 Backing up current state..."
           
-          # 备份.git目录和工作流文件
-          cp -r .git /tmp/git-backup
-          
-          # 确保.github目录存在再备份
-          if [ -d .github ]; then
-            cp -r .github /tmp/github-backup
-          else
-            mkdir -p /tmp/github-backup
-          fi
-          
-          echo "✅ Backup completed"
-      
-      - name: Sync content
-        run: |
-          TAG="${{ github.event.inputs.tag }}"
-          echo "🔄 Syncing content to $TAG..."
-          
-          # 验证temp-rspack目录存在且有内容
-          if [ ! -d temp-rspack ] || [ ! "$(ls -A temp-rspack)" ]; then
-            echo "❌ temp-rspack directory is missing or empty"
-            exit 1
-          fi
-          
-          echo "📋 Files in temp-rspack:"
-          ls -la temp-rspack/ | head -20
-          
-          # 清空当前内容（除了.git和temp-rspack）
-          echo "🗑️ Clearing current content..."
-          find . -maxdepth 1 ! -name '.git' ! -name 'temp-rspack' ! -name 'rspack-tag.tar.gz' ! -name '.' ! -name '..' -exec rm -rf {} + 2>/dev/null || true
-          
-          # 复制新内容 - 更详细的复制过程
-          echo "📋 Copying new content..."
-          
-          # 复制所有文件和目录（完整同步）
-          if [ "$(find temp-rspack -mindepth 1 -maxdepth 1 -type f -o -type d | head -1)" ]; then
-            cp -r temp-rspack/* . 2>/dev/null && echo "✅ Regular files copied" || echo "⚠️ No regular files to copy"
-          fi
-          
-          # 复制隐藏文件
-          if [ "$(find temp-rspack -mindepth 1 -maxdepth 1 -name '.*' | head -1)" ]; then
-            cp -r temp-rspack/.[^.]* . 2>/dev/null && echo "✅ Hidden files copied" || echo "⚠️ No hidden files to copy"
-          fi
-          
-          echo "📋 Current directory after copy:"
-          ls -la | head -20
-          
-          # 恢复工作流文件（保留同步能力）
-          echo "🔧 Restoring workflow files..."
-          mkdir -p .github/workflows
-          
-          if [ -f /tmp/github-backup/workflows/sync-rspack-tag.yml ]; then
-            cp /tmp/github-backup/workflows/sync-rspack-tag.yml .github/workflows/
-            echo "✅ Workflow file restored"
-          else
-            echo "⚠️ Original workflow file not found, creating new one"
-          fi
-          
-          echo "✅ Content synced to $TAG"
-      
-      - name: Clean up temporary files
-        run: |
-          echo "🧹 Cleaning up temporary files..."
-          rm -rf temp-rspack rspack-tag.tar.gz 2>/dev/null || true
-          echo "✅ Cleanup completed"
-      
-      - name: Commit changes
-        run: |
-          TAG="${{ github.event.inputs.tag }}"
-          
-          # 添加所有变更
+          # 添加所有文件
           git add .
           
-          # 检查是否有变更
-          if git diff --staged --quiet; then
-            echo "📋 No changes detected, repository is already at $TAG"
-            echo "NO_CHANGES=true" >> $GITHUB_ENV
-          else
-            # 提交变更
-            COMMIT_MSG="🔄 Sync to rspack $TAG"$'\n\n'"Synced from: https://github.com/web-infra-dev/rspack/tree/$TAG"$'\n'"Sync date: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"$'\n\n'"This commit updates the repository to match rspack $TAG exactly."
-            
-            git commit -m "$COMMIT_MSG"
-            
-            echo "✅ Changes committed"
-            echo "NO_CHANGES=false" >> $GITHUB_ENV
-          fi
-      
-      - name: Push sync branch
-        if: env.NO_CHANGES == 'false'
-        run: |
+          # 提交变更
+          git commit -m "🔄 Sync to rspack $TAG" -m "Synced from: https://github.com/web-infra-dev/rspack/tree/$TAG"
+          
+          # 推送同步分支
           git push origin "$SYNC_BRANCH"
-          echo "✅ Sync branch pushed"
+          
+          echo "✅ Changes committed and pushed"
       
-      - name: Switch back to main branch
-        if: env.NO_CHANGES == 'false'
-        run: |
-          # 切换回主分支
-          git checkout main || git checkout master
-          echo "✅ Switched back to main branch"
-
-      - name: Create Pull Request
-        if: env.NO_CHANGES == 'false'
-        uses: peter-evans/create-pull-request@v5
+      - name: Checkout target repository for PR
+        uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           token: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
-          branch: ${{ env.SYNC_BRANCH }}
-          delete-branch: false
-          title: "🔄 Sync to rspack ${{ github.event.inputs.tag }}"
-          body: |
-            ## 🚀 Rspack Tag Sync
-            
-            This PR syncs the repository to **rspack `${{ github.event.inputs.tag }}`**.
-            
-            ### 📋 Details
-            - **Source**: [web-infra-dev/rspack](https://github.com/web-infra-dev/rspack)
-            - **Tag**: `${{ github.event.inputs.tag }}`
-            - **Sync Date**: ${{ github.run_id }} (Run ID)
-            
-            ### 🔗 Links
-            - [Tag on GitHub](https://github.com/web-infra-dev/rspack/tree/${{ github.event.inputs.tag }})
-            - [Release Notes](https://github.com/web-infra-dev/rspack/releases/tag/${{ github.event.inputs.tag }})
-            
-            ### ⚠️ Review Notes
-            - This is a complete sync to match the upstream tag
-            - Please review changes before merging
-            - The sync workflow is preserved in `.github/workflows/`
-            
-            ---
-            *🤖 Auto-generated by GitHub Actions*
+      
+      - name: Create Pull Request
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          
+          # 创建简单的PR
+          gh pr create \
+            --title "🔄 Sync to rspack $TAG" \
+            --body "Complete sync to rspack $TAG using git clone method. Includes all source code, configs, and workflows." \
+            --head "$SYNC_BRANCH"
+          
+          echo "✅ Pull Request created successfully"
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
       
       - name: Summary
         run: |
           TAG="${{ github.event.inputs.tag }}"
-          
           echo "## 📊 Sync Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Target**: [rspack $TAG](https://github.com/web-infra-dev/rspack/tree/$TAG)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Sync Branch**: \`$SYNC_BRANCH\`" >> $GITHUB_STEP_SUMMARY
-          
-          if [ "$NO_CHANGES" = "true" ]; then
-            echo "- **Status**: ✅ No changes needed" >> $GITHUB_STEP_SUMMARY
-            echo "- **Result**: Repository already matches $TAG" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- **Status**: ✅ Sync completed" >> $GITHUB_STEP_SUMMARY
-            echo "- **Result**: PR created for review" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔗 Quick Links" >> $GITHUB_STEP_SUMMARY
-          echo "- [Rspack Releases](https://github.com/web-infra-dev/rspack/releases)" >> $GITHUB_STEP_SUMMARY
-          echo "- [Rspack Documentation](https://rspack.rs/)" >> $GITHUB_STEP_SUMMARY 
+          echo "- **Method**: Git clone + remote switch" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target**: rspack $TAG" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: $SYNC_BRANCH" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ✅ PR created" >> $GITHUB_STEP_SUMMARY 
