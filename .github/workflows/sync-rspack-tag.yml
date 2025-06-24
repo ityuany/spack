@@ -13,14 +13,13 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      actions: write
     
     steps:
       - name: Checkout current repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
       
       - name: Configure Git
         run: |
@@ -118,7 +117,7 @@ jobs:
           # 复制新内容 - 更详细的复制过程
           echo "📋 Copying new content..."
           
-          # 复制所有文件和目录
+          # 复制所有文件和目录（完整同步）
           if [ "$(find temp-rspack -mindepth 1 -maxdepth 1 -type f -o -type d | head -1)" ]; then
             cp -r temp-rspack/* . 2>/dev/null && echo "✅ Regular files copied" || echo "⚠️ No regular files to copy"
           fi
@@ -188,7 +187,7 @@ jobs:
         if: env.NO_CHANGES == 'false'
         uses: peter-evans/create-pull-request@v5
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
           branch: ${{ env.SYNC_BRANCH }}
           delete-branch: false
           title: "🔄 Sync to rspack ${{ github.event.inputs.tag }}"
