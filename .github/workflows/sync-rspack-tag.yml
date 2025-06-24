@@ -29,20 +29,45 @@ jobs:
       - name: Download and extract tag
         run: |
           TAG="${{ github.event.inputs.tag }}"
-          echo "Downloading rspack tag: $TAG"
+          echo "🔄 Downloading rspack tag: $TAG"
           
           # 下载指定tag的代码
-          wget -O rspack-tag.tar.gz "https://github.com/web-infra-dev/rspack/archive/refs/tags/$TAG.tar.gz"
+          DOWNLOAD_URL="https://github.com/web-infra-dev/rspack/archive/refs/tags/$TAG.tar.gz"
+          echo "Download URL: $DOWNLOAD_URL"
           
-          # 验证下载成功
-          if [ ! -f rspack-tag.tar.gz ]; then
+          if wget -O rspack-tag.tar.gz "$DOWNLOAD_URL"; then
+            echo "✅ Downloaded successfully"
+          else
             echo "❌ Failed to download tag $TAG"
+            echo "请检查tag是否存在: https://github.com/web-infra-dev/rspack/tags"
             exit 1
           fi
           
-          # 解压到临时目录
+          # 验证文件存在且不为空
+          if [ ! -f rspack-tag.tar.gz ] || [ ! -s rspack-tag.tar.gz ]; then
+            echo "❌ Downloaded file is missing or empty"
+            exit 1
+          fi
+          
+          # 创建临时目录并解压
           mkdir -p temp-rspack
-          tar -xzf rspack-tag.tar.gz -C temp-rspack --strip-components=1
+          
+          echo "📦 Extracting archive..."
+          if tar -xzf rspack-tag.tar.gz -C temp-rspack --strip-components=1; then
+            echo "✅ Extracted successfully"
+          else
+            echo "❌ Failed to extract archive"
+            exit 1
+          fi
+          
+          # 验证解压结果
+          if [ ! "$(ls -A temp-rspack)" ]; then
+            echo "❌ Extracted directory is empty"
+            exit 1
+          fi
+          
+          echo "📋 Extracted files:"
+          ls -la temp-rspack/ | head -10
           
           echo "✅ Successfully downloaded and extracted $TAG"
       
@@ -55,24 +80,52 @@ jobs:
           git checkout -b "$SYNC_BRANCH"
           echo "✅ Created sync branch: $SYNC_BRANCH"
       
+      - name: Backup current state
+        run: |
+          echo "💾 Backing up current state..."
+          
+          # 备份.git目录和工作流文件
+          cp -r .git /tmp/git-backup
+          
+          # 确保.github目录存在再备份
+          if [ -d .github ]; then
+            cp -r .github /tmp/github-backup
+          else
+            mkdir -p /tmp/github-backup
+          fi
+          
+          echo "✅ Backup completed"
+      
       - name: Sync content
         run: |
           TAG="${{ github.event.inputs.tag }}"
+          echo "🔄 Syncing content to $TAG..."
           
-          # 备份.git目录和当前工作流文件
-          cp -r .git /tmp/git-backup
-          cp -r .github /tmp/github-backup
+          # 验证temp-rspack目录存在且有内容
+          if [ ! -d temp-rspack ] || [ ! "$(ls -A temp-rspack)" ]; then
+            echo "❌ temp-rspack directory is missing or empty"
+            exit 1
+          fi
           
           # 清空当前内容（除了.git）
+          echo "🗑️ Clearing current content..."
           find . -maxdepth 1 ! -name '.git' ! -name '.' ! -name '..' -exec rm -rf {} + 2>/dev/null || true
           
           # 复制新内容
-          cp -r temp-rspack/* .
-          cp -r temp-rspack/.[^.]* . 2>/dev/null || true
+          echo "📋 Copying new content..."
+          cp -r temp-rspack/* . 2>/dev/null || echo "Warning: No regular files to copy"
+          cp -r temp-rspack/.[^.]* . 2>/dev/null || echo "Warning: No hidden files to copy"
           
           # 恢复工作流文件（保留同步能力）
+          echo "🔧 Restoring workflow files..."
           mkdir -p .github/workflows
-          cp /tmp/github-backup/workflows/sync-rspack-tag.yml .github/workflows/
+          
+          if [ -f /tmp/github-backup/workflows/sync-rspack-tag.yml ]; then
+            cp /tmp/github-backup/workflows/sync-rspack-tag.yml .github/workflows/
+            echo "✅ Workflow file restored"
+          else
+            echo "⚠️ Original workflow file not found, creating new one"
+          fi
           
           # 清理临时文件
           rm -rf temp-rspack rspack-tag.tar.gz
