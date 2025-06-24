@@ -55,8 +55,12 @@ jobs:
           cd rspack-repo
           git init
           
-          # 添加您的仓库作为远程
-          git remote add origin https://github.com/${{ github.repository }}.git
+          # 配置认证token
+          git config credential.helper store
+          echo "https://x-access-token:${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}@github.com" > ~/.git-credentials
+          
+          # 添加您的仓库作为远程（使用认证URL）
+          git remote add origin https://x-access-token:${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
           
           # 获取目标仓库信息
           git fetch origin
