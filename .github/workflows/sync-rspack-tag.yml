@@ -107,14 +107,28 @@ jobs:
             exit 1
           fi
           
-          # 清空当前内容（除了.git）
-          echo "🗑️ Clearing current content..."
-          find . -maxdepth 1 ! -name '.git' ! -name '.' ! -name '..' -exec rm -rf {} + 2>/dev/null || true
+          echo "📋 Files in temp-rspack:"
+          ls -la temp-rspack/ | head -20
           
-          # 复制新内容
+          # 清空当前内容（除了.git和temp-rspack）
+          echo "🗑️ Clearing current content..."
+          find . -maxdepth 1 ! -name '.git' ! -name 'temp-rspack' ! -name 'rspack-tag.tar.gz' ! -name '.' ! -name '..' -exec rm -rf {} + 2>/dev/null || true
+          
+          # 复制新内容 - 更详细的复制过程
           echo "📋 Copying new content..."
-          cp -r temp-rspack/* . 2>/dev/null || echo "Warning: No regular files to copy"
-          cp -r temp-rspack/.[^.]* . 2>/dev/null || echo "Warning: No hidden files to copy"
+          
+          # 复制所有文件和目录
+          if [ "$(find temp-rspack -mindepth 1 -maxdepth 1 -type f -o -type d | head -1)" ]; then
+            cp -r temp-rspack/* . 2>/dev/null && echo "✅ Regular files copied" || echo "⚠️ No regular files to copy"
+          fi
+          
+          # 复制隐藏文件
+          if [ "$(find temp-rspack -mindepth 1 -maxdepth 1 -name '.*' | head -1)" ]; then
+            cp -r temp-rspack/.[^.]* . 2>/dev/null && echo "✅ Hidden files copied" || echo "⚠️ No hidden files to copy"
+          fi
+          
+          echo "📋 Current directory after copy:"
+          ls -la | head -20
           
           # 恢复工作流文件（保留同步能力）
           echo "🔧 Restoring workflow files..."
@@ -127,10 +141,13 @@ jobs:
             echo "⚠️ Original workflow file not found, creating new one"
           fi
           
-          # 清理临时文件
-          rm -rf temp-rspack rspack-tag.tar.gz
-          
           echo "✅ Content synced to $TAG"
+      
+      - name: Clean up temporary files
+        run: |
+          echo "🧹 Cleaning up temporary files..."
+          rm -rf temp-rspack rspack-tag.tar.gz 2>/dev/null || true
+          echo "✅ Cleanup completed"
       
       - name: Commit changes
         run: |
