@@ -13,38 +13,43 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      actions: write  # 需要写入.github/workflows文件
     
     steps:
-      - name: Configure Git
+      - name: Configure Git and install dependencies
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 确保rsync可用（用于安全复制文件）
+          if ! command -v rsync >/dev/null 2>&1; then
+            echo "📦 Installing rsync..."
+            sudo apt-get update -q
+            sudo apt-get install -y rsync
+          else
+            echo "✅ rsync is already available"
+          fi
       
       - name: Clone rspack repository
         run: |
           TAG="${{ github.event.inputs.tag }}"
-          echo "🔄 Cloning rspack repository..."
+          echo "🔄 Cloning rspack repository at tag $TAG..."
           
-          # 克隆rspack仓库
-          git clone https://github.com/web-infra-dev/rspack.git rspack-source
-          cd rspack-source
-          
-          echo "📋 Available tags:"
-          git tag | grep -E "^v[0-9]" | tail -10
-          
-          # 检查tag是否存在
-          if ! git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "❌ Tag $TAG not found in rspack repository"
-            echo "Available tags:"
-            git tag | grep -E "^v[0-9]" | tail -20
+          # 直接克隆指定tag
+          if git clone --depth 1 --branch "$TAG" https://github.com/web-infra-dev/rspack.git rspack-source; then
+            echo "✅ Successfully cloned rspack at tag $TAG"
+          else
+            echo "❌ Failed to clone tag $TAG, it may not exist"
+            echo "🔄 Checking available tags..."
+            
+            # 获取可用tags列表
+            git ls-remote --tags https://github.com/web-infra-dev/rspack.git | \
+              grep -E 'refs/tags/v[0-9]' | \
+              sed 's/.*refs\/tags\///' | \
+              sort -V | \
+              tail -10
             exit 1
           fi
-          
-          # 切换到指定tag
-          echo "🔄 Checking out tag $TAG..."
-          git checkout "$TAG"
-          
-          echo "✅ Successfully cloned rspack at tag $TAG"
       
       - name: Checkout target repository
         uses: actions/checkout@v4
@@ -82,32 +87,69 @@ jobs:
           
           # 复制rspack内容
           echo "📋 Copying rspack content..."
-          cp -r ../rspack-source/* . 2>/dev/null || echo "No regular files to copy"
-          cp -r ../rspack-source/.[^.]* . 2>/dev/null || echo "No hidden files to copy"
           
-          # 处理workflow文件权限问题
-          if [ -d ".github/workflows" ]; then
-            echo "⚠️ Found rspack workflows, checking permissions..."
-            
-            # 备份原有的同步工作流
+          # 检查源目录内容
+          echo "📋 Source directory contents:"
+          ls -la ../rspack-source/
+          
+          # 复制rspack的所有内容，包括workflows
+          if [ -d "../rspack-source" ]; then
+            # 先备份当前的同步workflow
+            echo "📋 Backing up current sync workflow..."
             if [ -f ".github/workflows/sync-rspack-tag.yml" ]; then
               cp .github/workflows/sync-rspack-tag.yml /tmp/sync-workflow-backup.yml
-            fi
-            
-            # 移除rspack的workflows（避免权限问题）
-            rm -rf .github/workflows
-            
-            # 恢复同步工作流
-            mkdir -p .github/workflows
-            if [ -f "/tmp/sync-workflow-backup.yml" ]; then
-              cp /tmp/sync-workflow-backup.yml .github/workflows/sync-rspack-tag.yml
-              echo "✅ Preserved sync workflow"
+              echo "✅ Sync workflow backed up"
             else
-              echo "⚠️ Sync workflow will need to be restored manually"
+              echo "⚠️ No existing sync workflow found"
             fi
             
-            echo "📋 Excluded rspack workflows to avoid permission issues"
+            # 复制rspack的所有内容（包括.github目录）
+            if command -v rsync >/dev/null 2>&1; then
+              echo "📋 Using rsync to copy all content (including .github)"
+              rsync -av --exclude='.git*' ../rspack-source/ ./
+            else
+              echo "📋 rsync not available, using cp"
+              # 复制除了.git之外的所有内容
+              find ../rspack-source -maxdepth 1 -mindepth 1 \
+                -not -name '.git*' \
+                -exec cp -r {} ./ \;
+            fi
+            
+            # 恢复同步workflow（覆盖rspack可能的同名文件）
+            if [ -f "/tmp/sync-workflow-backup.yml" ]; then
+              mkdir -p .github/workflows
+              cp /tmp/sync-workflow-backup.yml .github/workflows/sync-rspack-tag.yml
+              echo "✅ Sync workflow restored (preserved over rspack version)"
+            fi
+            
+            # 验证关键目录是否被正确复制
+            if [ -d "packages" ]; then
+              echo "✅ packages/ directory copied"
+            fi
+            if [ -d "crates" ]; then
+              echo "✅ crates/ directory copied"  
+            fi
+            if [ -f "package.json" ]; then
+              echo "✅ package.json copied"
+            fi
+            if [ -f "Cargo.toml" ]; then
+              echo "✅ Cargo.toml copied"
+            fi
+            if [ -d ".github/workflows" ]; then
+              echo "✅ .github/workflows directory copied"
+              echo "📋 Available workflows:"
+              ls -la .github/workflows/
+            fi
+            
+            echo "✅ Rspack content copied successfully (including workflows)"
+          else
+            echo "❌ Source directory not found"
+            exit 1
           fi
+          
+          # 验证复制结果
+          echo "📋 Target directory contents after copy:"
+          ls -la .
           
           echo "✅ Content synced successfully"
       
@@ -127,13 +169,18 @@ jobs:
           # 添加所有文件
           git add .
           
+          # 显示将要提交的文件
+          echo "📋 Files to be committed:"
+          git status --porcelain
+          echo "📋 Added files count: $(git status --porcelain | wc -l)"
+          
           # 检查是否有变更
           if git diff --staged --quiet; then
             echo "📋 No changes to commit"
             echo "NO_CHANGES=true" >> $GITHUB_ENV
           else
             # 提交变更
-            git commit -m "🔄 Sync to rspack $TAG" -m "Synced from: https://github.com/web-infra-dev/rspack/tree/$TAG" -m "Note: Rspack workflows excluded to avoid permission issues"
+            git commit -m "🔄 Sync to rspack $TAG" -m "Synced from: https://github.com/web-infra-dev/rspack/tree/$TAG" -m "Note: Includes rspack workflows, sync workflow preserved"
             
             # 显示分支信息用于调试
             echo "📋 Branch status before push:"
@@ -147,28 +194,28 @@ jobs:
             echo "NO_CHANGES=false" >> $GITHUB_ENV
           fi
       
-      - name: Create Pull Request
-        if: env.NO_CHANGES == 'false'
-        run: |
-          TAG="${{ github.event.inputs.tag }}"
+      # - name: Create Pull Request
+      #   if: env.NO_CHANGES == 'false'
+      #   run: |
+      #     TAG="${{ github.event.inputs.tag }}"
           
-          cd target-repo
+      #     cd target-repo
           
-          # 确认分支状态和差异
-          echo "📋 Confirming branch differences:"
-          git fetch origin main
-          git log --oneline origin/main..$SYNC_BRANCH
+      #     # 确认分支状态和差异
+      #     echo "📋 Confirming branch differences:"
+      #     git fetch origin main
+      #     git log --oneline origin/main..$SYNC_BRANCH
           
-          # 创建PR
-          gh pr create \
-            --title "🔄 Sync to rspack $TAG" \
-            --body "Complete sync to rspack $TAG using git clone method. Includes all source code and configs. Rspack workflows excluded to avoid permission issues." \
-            --head "$SYNC_BRANCH" \
-            --base main
+      #     # 创建PR
+      #     gh pr create \
+      #       --title "🔄 Sync to rspack $TAG" \
+      #       --body "Complete sync to rspack $TAG using git clone method. Includes all source code and configs. Rspack workflows excluded to avoid permission issues." \
+      #       --head "$SYNC_BRANCH" \
+      #       --base main
           
-          echo "✅ Pull Request created successfully"
-        env:
-          GH_TOKEN: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+      #     echo "✅ Pull Request created successfully"
+      #   env:
+      #     GH_TOKEN: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
       
       - name: Summary
         run: |
