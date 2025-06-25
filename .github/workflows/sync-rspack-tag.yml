@@ -70,6 +70,18 @@ jobs:
           git checkout main
           git pull origin main
           
+          # 检查并清理可能存在的远程同步分支
+          if git ls-remote --heads origin "$SYNC_BRANCH" | grep -q "$SYNC_BRANCH"; then
+            echo "⚠️ Remote branch $SYNC_BRANCH already exists, deleting it..."
+            git push origin --delete "$SYNC_BRANCH" || echo "Failed to delete remote branch, will force push later"
+          fi
+          
+          # 删除可能存在的本地同步分支
+          if git branch | grep -q " $SYNC_BRANCH$"; then
+            echo "🔄 Deleting existing local branch $SYNC_BRANCH..."
+            git branch -D "$SYNC_BRANCH" || echo "Failed to delete local branch"
+          fi
+          
           # 基于main分支创建同步分支（保持git历史连接）
           git checkout -b "$SYNC_BRANCH"
           
@@ -171,8 +183,16 @@ jobs:
             git log --oneline -5
             git status
             
-            # 推送同步分支
-            git push origin "$SYNC_BRANCH"
+            # 处理可能的分支冲突，强制推送或删除远程分支
+            echo "📋 Checking if remote branch exists..."
+            if git ls-remote --heads origin "$SYNC_BRANCH" | grep -q "$SYNC_BRANCH"; then
+              echo "⚠️ Remote branch $SYNC_BRANCH already exists"
+              echo "🔄 Force pushing to update remote branch..."
+              git push --force origin "$SYNC_BRANCH"
+            else
+              echo "📋 Remote branch doesn't exist, pushing new branch..."
+              git push origin "$SYNC_BRANCH"
+            fi
             
             echo "✅ Changes committed and pushed"
             echo "NO_CHANGES=false" >> $GITHUB_ENV
