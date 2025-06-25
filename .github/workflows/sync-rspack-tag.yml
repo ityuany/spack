@@ -97,12 +97,12 @@ jobs:
             # 完全复制rspack的所有内容（包括.github目录和所有workflows）
             if command -v rsync >/dev/null 2>&1; then
               echo "📋 Using rsync to copy all rspack content (including .github workflows)"
-              rsync -av --exclude='.git*' ../rspack-source/ ./
+              rsync -av --exclude='.git' ../rspack-source/ ./
             else
               echo "📋 rsync not available, using cp"
-              # 复制除了.git之外的所有内容
+              # 复制除了.git目录之外的所有内容
               find ../rspack-source -maxdepth 1 -mindepth 1 \
-                -not -name '.git*' \
+                -not -name '.git' \
                 -exec cp -r {} ./ \;
             fi
             
