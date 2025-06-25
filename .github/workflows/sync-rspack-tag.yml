@@ -81,6 +81,15 @@ jobs:
           
           cd target-repo
           
+          # 先备份当前的同步workflow（在删除内容之前）
+          echo "📋 Backing up current sync workflow..."
+          if [ -f ".github/workflows/sync-rspack-tag.yml" ]; then
+            cp .github/workflows/sync-rspack-tag.yml /tmp/sync-workflow-backup.yml
+            echo "✅ Sync workflow backed up"
+          else
+            echo "⚠️ No existing sync workflow found"
+          fi
+          
           # 清空当前内容（保留.git目录）
           echo "🗑️ Clearing current content..."
           find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
@@ -94,14 +103,6 @@ jobs:
           
           # 复制rspack的所有内容，包括workflows
           if [ -d "../rspack-source" ]; then
-            # 先备份当前的同步workflow
-            echo "📋 Backing up current sync workflow..."
-            if [ -f ".github/workflows/sync-rspack-tag.yml" ]; then
-              cp .github/workflows/sync-rspack-tag.yml /tmp/sync-workflow-backup.yml
-              echo "✅ Sync workflow backed up"
-            else
-              echo "⚠️ No existing sync workflow found"
-            fi
             
             # 复制rspack的所有内容（包括.github目录）
             if command -v rsync >/dev/null 2>&1; then
