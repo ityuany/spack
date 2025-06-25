@@ -61,7 +61,7 @@ jobs:
       - name: Create sync branch from target repo
         run: |
           TAG="${{ github.event.inputs.tag }}"
-          SYNC_BRANCH="upstream-$TAG"
+          SYNC_BRANCH="upstream/$TAG"
           echo "SYNC_BRANCH=$SYNC_BRANCH" >> $GITHUB_ENV
 
           cd target-repo
