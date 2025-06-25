@@ -7,6 +7,13 @@ on:
         required: true
         type: string
 
+
+env:
+  RSPACK_TAG: ${{ github.event.inputs.tag }}
+  SYNC_BRANCH: upstream/${{ github.event.inputs.tag }}
+  RSPACK_REPO: web-infra-dev/rspack
+  RSPACK_REPO_URL: https://github.com/web-infra-dev/rspack.git
+
 jobs:
   sync-tag:
     runs-on: ubuntu-latest
@@ -15,35 +22,18 @@ jobs:
       pull-requests: write
       actions: write  # 需要写入.github/workflows文件
     
-    steps:
-      # - name: Configure Git and install dependencies
-      #   run: |
-      #     git config --global user.name "github-actions[bot]"
-      #     git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
-      #     # 确保rsync可用（用于安全复制文件）
-      #     if ! command -v rsync >/dev/null 2>&1; then
-      #       echo "📦 Installing rsync..."
-      #       sudo apt-get update -q
-      #       sudo apt-get install -y rsync
-      #     else
-      #       echo "✅ rsync is already available"
-      #     fi
-      
+    steps: 
       - name: Clone rspack repository
         run: |
-          TAG="${{ github.event.inputs.tag }}"
-          echo "🔄 Cloning rspack repository at tag $TAG..."
-          
           # 直接克隆指定tag
-          if git clone --depth 1 --branch "$TAG" https://github.com/web-infra-dev/rspack.git rspack-source; then
-            echo "✅ Successfully cloned rspack at tag $TAG"
+          if git clone --depth 1 --branch "$RSPACK_TAG" $RSPACK_REPO_URL rspack-source; then
+            echo "✅ Successfully cloned rspack at tag $RSPACK_TAG"
           else
-            echo "❌ Failed to clone tag $TAG, it may not exist"
+            echo "❌ Failed to clone tag $RSPACK_TAG, it may not exist"
             echo "🔄 Checking available tags..."
             
             # 获取可用tags列表
-            git ls-remote --tags https://github.com/web-infra-dev/rspack.git | \
+            git ls-remote --tags $RSPACK_REPO_URL | \
               grep -E 'refs/tags/v[0-9]' | \
               sed 's/.*refs\/tags\///' | \
               sort -V | \
@@ -61,7 +51,6 @@ jobs:
       - name: Create sync branch from target repo
         run: |
           TAG="${{ github.event.inputs.tag }}"
-          SYNC_BRANCH="upstream/$TAG"
           echo "SYNC_BRANCH=$SYNC_BRANCH" >> $GITHUB_ENV
 
           cd target-repo
@@ -89,8 +78,6 @@ jobs:
       
       - name: Sync rspack content
         run: |
-          TAG="${{ github.event.inputs.tag }}"
-          
           cd target-repo
           
           # 清空当前内容（保留.git目录）
@@ -150,9 +137,7 @@ jobs:
           echo "✅ Content synced successfully"
       
       - name: Commit and push changes
-        run: |
-          TAG="${{ github.event.inputs.tag }}"
-          
+        run: |          
           cd target-repo
           
           # 配置git使用token进行认证
@@ -176,7 +161,7 @@ jobs:
             echo "NO_CHANGES=true" >> $GITHUB_ENV
           else
             # 提交变更
-            git commit -m "🔄 Sync to rspack $TAG" -m "Synced from: https://github.com/web-infra-dev/rspack/tree/$TAG" -m "Note: Complete sync including all rspack workflows"
+            git commit -m "🔄 Sync to rspack $RSPACK_TAG" -m "Synced from: $RSPACK_REPO $RSPACK_TAG" -m "Note: Complete sync including all rspack workflows"
             
             # 显示分支信息用于调试
             echo "📋 Branch status before push:"
@@ -200,10 +185,9 @@ jobs:
       
       - name: Summary
         run: |
-          TAG="${{ github.event.inputs.tag }}"
           echo "## 📊 Sync Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **Method**: Git clone with history preservation" >> $GITHUB_STEP_SUMMARY
-          echo "- **Target**: rspack $TAG" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target**: rspack $RSPACK_TAG" >> $GITHUB_STEP_SUMMARY
           echo "- **Branch**: $SYNC_BRANCH" >> $GITHUB_STEP_SUMMARY
           if [ "$NO_CHANGES" = "true" ]; then
             echo "- **Status**: ✅ No changes needed" >> $GITHUB_STEP_SUMMARY
