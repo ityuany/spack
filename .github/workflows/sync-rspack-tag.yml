@@ -61,10 +61,14 @@ jobs:
 
           cd target-repo
           
+          # 确保在main分支
+          git checkout main
+          git pull origin main
+          
           # 基于main分支创建同步分支（保持git历史连接）
           git checkout -b "$SYNC_BRANCH"
           
-          echo "✅ Created sync branch: $SYNC_BRANCH"
+          echo "✅ Created sync branch: $SYNC_BRANCH based on main"
       
       - name: Sync rspack content
         run: |
@@ -131,6 +135,11 @@ jobs:
             # 提交变更
             git commit -m "🔄 Sync to rspack $TAG" -m "Synced from: https://github.com/web-infra-dev/rspack/tree/$TAG" -m "Note: Rspack workflows excluded to avoid permission issues"
             
+            # 显示分支信息用于调试
+            echo "📋 Branch status before push:"
+            git log --oneline -5
+            git status
+            
             # 推送同步分支
             git push origin "$SYNC_BRANCH"
             
@@ -145,11 +154,17 @@ jobs:
           
           cd target-repo
           
+          # 确认分支状态和差异
+          echo "📋 Confirming branch differences:"
+          git fetch origin main
+          git log --oneline origin/main..$SYNC_BRANCH
+          
           # 创建PR
           gh pr create \
             --title "🔄 Sync to rspack $TAG" \
             --body "Complete sync to rspack $TAG using git clone method. Includes all source code and configs. Rspack workflows excluded to avoid permission issues." \
-            --head "$SYNC_BRANCH"
+            --head "$SYNC_BRANCH" \
+            --base main
           
           echo "✅ Pull Request created successfully"
         env:
