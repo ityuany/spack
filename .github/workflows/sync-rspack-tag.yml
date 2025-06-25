@@ -81,15 +81,6 @@ jobs:
           
           cd target-repo
           
-          # 先备份当前的同步workflow（在删除内容之前）
-          echo "📋 Backing up current sync workflow..."
-          if [ -f ".github/workflows/sync-rspack-tag.yml" ]; then
-            cp .github/workflows/sync-rspack-tag.yml /tmp/sync-workflow-backup.yml
-            echo "✅ Sync workflow backed up"
-          else
-            echo "⚠️ No existing sync workflow found"
-          fi
-          
           # 清空当前内容（保留.git目录）
           echo "🗑️ Clearing current content..."
           find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
@@ -103,10 +94,9 @@ jobs:
           
           # 复制rspack的所有内容，包括workflows
           if [ -d "../rspack-source" ]; then
-            
-            # 复制rspack的所有内容（包括.github目录）
+            # 完全复制rspack的所有内容（包括.github目录和所有workflows）
             if command -v rsync >/dev/null 2>&1; then
-              echo "📋 Using rsync to copy all content (including .github)"
+              echo "📋 Using rsync to copy all rspack content (including .github workflows)"
               rsync -av --exclude='.git*' ../rspack-source/ ./
             else
               echo "📋 rsync not available, using cp"
@@ -114,13 +104,6 @@ jobs:
               find ../rspack-source -maxdepth 1 -mindepth 1 \
                 -not -name '.git*' \
                 -exec cp -r {} ./ \;
-            fi
-            
-            # 恢复同步workflow（覆盖rspack可能的同名文件）
-            if [ -f "/tmp/sync-workflow-backup.yml" ]; then
-              mkdir -p .github/workflows
-              cp /tmp/sync-workflow-backup.yml .github/workflows/sync-rspack-tag.yml
-              echo "✅ Sync workflow restored (preserved over rspack version)"
             fi
             
             # 验证关键目录是否被正确复制
@@ -138,11 +121,11 @@ jobs:
             fi
             if [ -d ".github/workflows" ]; then
               echo "✅ .github/workflows directory copied"
-              echo "📋 Available workflows:"
+              echo "📋 Rspack workflows available:"
               ls -la .github/workflows/
             fi
             
-            echo "✅ Rspack content copied successfully (including workflows)"
+            echo "✅ Rspack content copied successfully (complete sync including all workflows)"
           else
             echo "❌ Source directory not found"
             exit 1
@@ -181,7 +164,7 @@ jobs:
             echo "NO_CHANGES=true" >> $GITHUB_ENV
           else
             # 提交变更
-            git commit -m "🔄 Sync to rspack $TAG" -m "Synced from: https://github.com/web-infra-dev/rspack/tree/$TAG" -m "Note: Includes rspack workflows, sync workflow preserved"
+            git commit -m "🔄 Sync to rspack $TAG" -m "Synced from: https://github.com/web-infra-dev/rspack/tree/$TAG" -m "Note: Complete sync including all rspack workflows"
             
             # 显示分支信息用于调试
             echo "📋 Branch status before push:"
