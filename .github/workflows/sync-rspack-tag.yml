@@ -194,29 +194,6 @@ jobs:
             echo "NO_CHANGES=false" >> $GITHUB_ENV
           fi
       
-      # - name: Create Pull Request
-      #   if: env.NO_CHANGES == 'false'
-      #   run: |
-      #     TAG="${{ github.event.inputs.tag }}"
-          
-      #     cd target-repo
-          
-      #     # 确认分支状态和差异
-      #     echo "📋 Confirming branch differences:"
-      #     git fetch origin main
-      #     git log --oneline origin/main..$SYNC_BRANCH
-          
-      #     # 创建PR
-      #     gh pr create \
-      #       --title "🔄 Sync to rspack $TAG" \
-      #       --body "Complete sync to rspack $TAG using git clone method. Includes all source code and configs. Rspack workflows excluded to avoid permission issues." \
-      #       --head "$SYNC_BRANCH" \
-      #       --base main
-          
-      #     echo "✅ Pull Request created successfully"
-      #   env:
-      #     GH_TOKEN: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
-      
       - name: Summary
         run: |
           TAG="${{ github.event.inputs.tag }}"
@@ -227,4 +204,5 @@ jobs:
           if [ "$NO_CHANGES" = "true" ]; then
             echo "- **Status**: ✅ No changes needed" >> $GITHUB_STEP_SUMMARY
           else
-            echo "- **Status**: ✅ PR created" >> $GITHUB_STEP_SUMMARY 
+            echo "- **Status**: ✅ Sync completed" >> $GITHUB_STEP_SUMMARY
+          fi 
