@@ -56,9 +56,9 @@ jobs:
       - name: Create sync branch from target repo
         run: |
           TAG="${{ github.event.inputs.tag }}"
-          SYNC_BRANCH="sync-rspack-$TAG-$(date +%Y%m%d-%H%M%S)"
+          SYNC_BRANCH="upstream-$TAG"
           echo "SYNC_BRANCH=$SYNC_BRANCH" >> $GITHUB_ENV
-          
+
           cd target-repo
           
           # 基于main分支创建同步分支（保持git历史连接）
@@ -112,6 +112,13 @@ jobs:
           TAG="${{ github.event.inputs.tag }}"
           
           cd target-repo
+          
+          # 配置git使用token进行认证
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 设置远程URL以使用token
+          git remote set-url origin https://x-access-token:${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
           
           # 添加所有文件
           git add .
