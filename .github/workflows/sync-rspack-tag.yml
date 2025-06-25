@@ -16,19 +16,19 @@ jobs:
       actions: write  # 需要写入.github/workflows文件
     
     steps:
-      - name: Configure Git and install dependencies
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+      # - name: Configure Git and install dependencies
+      #   run: |
+      #     git config --global user.name "github-actions[bot]"
+      #     git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # 确保rsync可用（用于安全复制文件）
-          if ! command -v rsync >/dev/null 2>&1; then
-            echo "📦 Installing rsync..."
-            sudo apt-get update -q
-            sudo apt-get install -y rsync
-          else
-            echo "✅ rsync is already available"
-          fi
+      #     # 确保rsync可用（用于安全复制文件）
+      #     if ! command -v rsync >/dev/null 2>&1; then
+      #       echo "📦 Installing rsync..."
+      #       sudo apt-get update -q
+      #       sudo apt-get install -y rsync
+      #     else
+      #       echo "✅ rsync is already available"
+      #     fi
       
       - name: Clone rspack repository
         run: |
